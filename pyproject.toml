@@ -1,7 +1,12 @@
 [project]
 name = "ny2026"
-version = "1.0.0"
+version = "1.0.1"
 description = "Countdown to New Year's day 2026"
+homepage = "https://github.com/willmcgugan/ny2026"
+repository = "https://github.com/willmcgugan/ny2026"
+description = "A countdown to 2026 in your Terminal"
+authors = ["Will McGugan <willmcgugan@gmail.com>"]
+license = "MIT"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
