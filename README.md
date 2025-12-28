@@ -1,6 +1,6 @@
 # A countdown to 2026 in your terminal.
 
-<img width="1249" height="855" alt="Screenshot 2025-12-28 at 21 42 21" src="https://github.com/user-attachments/assets/f9872cec-27a6-4154-b481-ee9383c8e46e" />
+<img alt="Screenshot 2025-12-28 at 21 42 21" src="https://github.com/user-attachments/assets/f9872cec-27a6-4154-b481-ee9383c8e46e" />
 
 Install with:
 
