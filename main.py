@@ -7,8 +7,365 @@ import math
 import random
 import time
 import os
+import sys
+import select
+import termios
+import tty
+from datetime import datetime, timezone
 from typing import List, Tuple
 from braille_canvas import BrailleCanvas
+
+
+# Digit segments as pixel patterns for braille canvas
+# Classic 7-segment display style
+# Each digit is represented as a grid of pixels (1 = on, 0 = off)
+DIGIT_PATTERNS = {
+    '0': [
+        "███████████",
+        "███████████",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "███████████",
+        "███████████",
+    ],
+    '1': [
+        "        ██",
+        "        ██",
+        "        ██",
+        "        ██",
+        "        ██",
+        "        ██",
+        "        ██",
+        "        ██",
+        "        ██",
+        "        ██",
+        "        ██",
+        "        ██",
+        "        ██",
+        "        ██",
+        "        ██",
+        "        ██",
+        "        ██",
+        "        ██",
+        "        ██",
+        "        ██",
+        "        ██",
+        "        ██",
+    ],
+    '2': [
+        "███████████",
+        "███████████",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "███████████",
+        "███████████",
+        "██         ",
+        "██         ",
+        "██         ",
+        "██         ",
+        "██         ",
+        "██         ",
+        "██         ",
+        "██         ",
+        "███████████",
+        "███████████",
+    ],
+    '3': [
+        "███████████",
+        "███████████",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "███████████",
+        "███████████",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "███████████",
+        "███████████",
+    ],
+    '4': [
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "███████████",
+        "███████████",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+    ],
+    '5': [
+        "███████████",
+        "███████████",
+        "██         ",
+        "██         ",
+        "██         ",
+        "██         ",
+        "██         ",
+        "██         ",
+        "██         ",
+        "██         ",
+        "███████████",
+        "███████████",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "███████████",
+        "███████████",
+    ],
+    '6': [
+        "███████████",
+        "███████████",
+        "██         ",
+        "██         ",
+        "██         ",
+        "██         ",
+        "██         ",
+        "██         ",
+        "██         ",
+        "██         ",
+        "███████████",
+        "███████████",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "███████████",
+        "███████████",
+    ],
+    '7': [
+        "███████████",
+        "███████████",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+    ],
+    '8': [
+        "███████████",
+        "███████████",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "███████████",
+        "███████████",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "███████████",
+        "███████████",
+    ],
+    '9': [
+        "███████████",
+        "███████████",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "██       ██",
+        "███████████",
+        "███████████",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "███████████",
+        "███████████",
+    ],
+    ':': [
+        "   ",
+        "   ",
+        "   ",
+        "   ",
+        "   ",
+        "██",
+        "██",
+        "   ",
+        "   ",
+        "   ",
+        "   ",
+        "   ",
+        "   ",
+        "██",
+        "██",
+        "   ",
+        "   ",
+        "   ",
+        "   ",
+        "   ",
+        "   ",
+        "   ",
+    ]
+}
+
+
+def get_countdown_to_newyear_2026() -> Tuple[str, bool]:
+    """
+    Calculate time remaining until New Year's Day 2026 (2026-01-01 00:00:00 UTC).
+    
+    Returns:
+        Tuple of (countdown string in format "HH:MM:SS", midnight_reached bool)
+    """
+    # New Year's Day 2026 UTC
+    target = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
+    
+    # Calculate difference
+    diff = target - now
+    
+    # If we've passed the target, show 00:00:00
+    if diff.total_seconds() <= 0:
+        return "00:00:00", True
+    
+    # Calculate hours, minutes, seconds
+    total_seconds = int(diff.total_seconds())
+    hours = total_seconds // 3600
+    minutes = (total_seconds % 3600) // 60
+    seconds = total_seconds % 60
+    
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}", False
+
+
+def render_countdown_on_canvas(canvas: BrailleCanvas, text: str, color: str):
+    """
+    Render countdown text on the braille canvas at the center.
+    
+    Args:
+        canvas: BrailleCanvas to render to
+        text: String to render (e.g., "12:34:56")
+        color: Color to use for the digits
+    """
+    # Calculate total width needed
+    total_width = 0
+    char_widths = []
+    for char in text:
+        if char in DIGIT_PATTERNS:
+            pattern = DIGIT_PATTERNS[char]
+            width = len(pattern[0]) if pattern else 0
+            char_widths.append(width)
+            total_width += width + 3  # 3 pixels spacing between digits
+        else:
+            # For characters not in patterns, append 0 width to keep lists aligned
+            char_widths.append(0)
+    
+    if total_width == 0:
+        return
+    
+    # Calculate starting position to center the text
+    digit_height = 22
+    start_x = (canvas.width - total_width) // 2
+    start_y = (canvas.height - digit_height) // 2
+    
+    # Render each character
+    current_x = start_x
+    for char, width in zip(text, char_widths):
+        if char in DIGIT_PATTERNS:
+            pattern = DIGIT_PATTERNS[char]
+            points = []
+            
+            # Convert pattern to pixel coordinates
+            for y, line in enumerate(pattern):
+                for x, pixel in enumerate(line):
+                    if pixel != ' ':
+                        px = current_x + x
+                        py = start_y + y
+                        if 0 <= px < canvas.width and 0 <= py < canvas.height:
+                            points.append((px, py))
+            
+            # Plot all pixels for this digit
+            if points:
+                canvas.plot(color, points)
+            
+            # Move to next character position
+            current_x += width + 3
 
 
 class Particle:
@@ -291,6 +648,18 @@ class Firework:
         return self.exploded and len(self.particles) == 0
 
 
+def is_key_pressed() -> str:
+    """
+    Check if a key has been pressed (non-blocking).
+    
+    Returns:
+        The key character if pressed, empty string otherwise
+    """
+    if select.select([sys.stdin], [], [], 0)[0]:
+        return sys.stdin.read(1)
+    return ""
+
+
 def main():
     """Main fireworks simulation loop."""
     # Get terminal size
@@ -299,9 +668,13 @@ def main():
     except OSError:
         columns, rows = 80, 24
     
+    
     # Canvas dimensions (pixels)
-    canvas_width = columns * 2
-    canvas_height = rows * 4
+    # Each braille character represents 2x4 pixels
+    # We need to leave one row for the cursor and ensure exact fit
+    # Use (columns - 1) to account for BrailleCanvas's ceiling division: (width + 1) // 2
+    canvas_width = (columns - 1) * 2
+    canvas_height = (rows - 1) * 4  # Subtract 1 row to prevent wrapping
     
     # Create canvas
     canvas = BrailleCanvas(canvas_width, canvas_height, default_color=0)
@@ -319,10 +692,19 @@ def main():
     last_spawn_time = 0.0
     spawn_interval = random.uniform(0.5, 1.5)  # Spawn new firework every 0.5-1.5 seconds
     
-    # Hide cursor
-    print("\033[?25l", end="")
+    # Midnight tracking
+    midnight_reached = False
+    
+    # Enter alternate screen mode, hide cursor and set terminal to raw mode for input
+    print("\033[?1049h\033[?25l", end="", flush=True)
+    
+    # Save terminal settings
+    old_settings = termios.tcgetattr(sys.stdin)
     
     try:
+        # Set terminal to raw mode for non-blocking input
+        tty.setraw(sys.stdin.fileno())
+        
         start_time = time.time()
         last_frame_time = start_time
         
@@ -339,11 +721,22 @@ def main():
             last_frame_time = current_time
             elapsed = current_time - start_time
             
+            # Check for space key press
+            key = is_key_pressed()
+            if key == ' ':
+                # Launch a single firework on space press
+                fireworks.append(Firework(canvas_width, canvas_height, camera_z))
+            elif key == 'q' or key == '\x03':  # 'q' or Ctrl+C
+                break
+            
+            # Check if midnight has been reached
+            countdown, midnight_reached = get_countdown_to_newyear_2026()
+            
             # Animate camera moving forward
             camera_z += camera_speed * dt
             
-            # Spawn new fireworks
-            if elapsed - last_spawn_time > spawn_interval:
+            # Spawn new fireworks automatically only after midnight
+            if midnight_reached and elapsed - last_spawn_time > spawn_interval:
                 fireworks.append(Firework(canvas_width, canvas_height, camera_z))
                 last_spawn_time = elapsed
                 spawn_interval = random.uniform(0.5, 1.5)
@@ -362,16 +755,23 @@ def main():
             for firework in fireworks:
                 firework.render(canvas, camera_z)
             
+            # Render countdown on canvas
+            countdown_color = BrailleCanvas.rgb_color(255, 255, 255)  # White
+            render_countdown_on_canvas(canvas, countdown, countdown_color)
+            
             # Render to screen (single write operation is faster)
+            # Use \033[H to position cursor at top-left and overwrite
             output = "\033[H" + canvas.render()
-            print(output, end="")
+            print(output, end="", flush=True)
             
     except KeyboardInterrupt:
         pass
     finally:
-        # Show cursor
-        print("\033[?25h")
-        print("\nFireworks simulation ended.")
+        # Restore terminal settings
+        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+        # Exit alternate screen mode, show cursor
+        print("\033[?1049l\033[?25h", flush=True)
+        print("Fireworks simulation ended.")
 
 
 if __name__ == "__main__":

@@ -192,7 +192,7 @@ class BrailleCanvas:
             
             lines.append(''.join(line_parts))
         
-        return '\n'.join(lines)
+        return '\r\033[B'.join(lines)
     
     def __str__(self) -> str:
         """Return the rendered canvas."""
