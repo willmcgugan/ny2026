@@ -751,7 +751,7 @@ def fireworks():
             if midnight_reached and elapsed - last_spawn_time > spawn_interval:
                 fireworks.append(Firework(canvas_width, canvas_height, camera_z))
                 last_spawn_time = elapsed
-                spawn_interval = random.uniform(0.5, 1.5)
+                spawn_interval = random.uniform(0.2, 1.0)
 
             # Update all fireworks
             for firework in fireworks:
@@ -770,7 +770,10 @@ def fireworks():
                 firework.render(canvas, camera_z)
 
             # Render countdown on canvas
-            countdown_color = BrailleCanvas.rgb_color(255, 255, 255)  # White
+            if midnight_reached:
+                countdown_color = BrailleCanvas.rgb_color(20, 255, 20)  # White
+            else:
+                countdown_color = BrailleCanvas.rgb_color(255, 255, 255)  # White
             render_countdown_on_canvas(canvas, countdown, countdown_color)
 
             # Render to screen (single write operation is faster)
