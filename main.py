@@ -8,12 +8,17 @@ import random
 import time
 import os
 import sys
-import select
-import termios
-import tty
 from datetime import datetime, timezone
 from typing import List, Tuple
 from braille_canvas import BrailleCanvas
+
+# Cross-platform keyboard input handling
+if sys.platform == "win32":
+    import msvcrt
+else:
+    import select
+    import termios
+    import tty
 
 
 # Digit segments as pixel patterns for braille canvas
@@ -45,28 +50,28 @@ DIGIT_PATTERNS = {
         "███████████",
     ],
     "1": [
-        "        ██",
-        "        ██",
-        "        ██",
-        "        ██",
-        "        ██",
-        "        ██",
-        "        ██",
-        "        ██",
-        "        ██",
-        "        ██",
-        "        ██",
-        "        ██",
-        "        ██",
-        "        ██",
-        "        ██",
-        "        ██",
-        "        ██",
-        "        ██",
-        "        ██",
-        "        ██",
-        "        ██",
-        "        ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
+        "         ██",
     ],
     "2": [
         "███████████",
@@ -261,28 +266,28 @@ DIGIT_PATTERNS = {
         "███████████",
     ],
     ":": [
-        "   ",
-        "   ",
-        "   ",
-        "   ",
-        "   ",
-        "██",
-        "██",
-        "   ",
-        "   ",
-        "   ",
-        "   ",
-        "   ",
-        "   ",
-        "██",
-        "██",
-        "   ",
-        "   ",
-        "   ",
-        "   ",
-        "   ",
-        "   ",
-        "   ",
+        "    ",
+        "    ",
+        "    ",
+        "    ",
+        "    ",
+        " ██ ",
+        " ██ ",
+        "    ",
+        "    ",
+        "    ",
+        "    ",
+        "    ",
+        "    ",
+        " ██ ",
+        " ██ ",
+        "    ",
+        "    ",
+        "    ",
+        "    ",
+        "    ",
+        "    ",
+        "    ",
     ],
 }
 
@@ -666,9 +671,21 @@ def is_key_pressed() -> str:
     Returns:
         The key character if pressed, empty string otherwise
     """
-    if select.select([sys.stdin], [], [], 0)[0]:
-        return sys.stdin.read(1)
-    return ""
+    if sys.platform == "win32":
+        # Windows implementation using msvcrt
+        if msvcrt.kbhit():
+            key = msvcrt.getch()
+            # Convert bytes to string
+            try:
+                return key.decode("utf-8")
+            except:
+                return ""
+        return ""
+    else:
+        # Unix implementation using select
+        if select.select([sys.stdin], [], [], 0)[0]:
+            return sys.stdin.read(1)
+        return ""
 
 
 def fireworks():
@@ -707,15 +724,18 @@ def fireworks():
     # Midnight tracking
     midnight_reached = False
 
-    # Enter alternate screen mode, hide cursor and set terminal to raw mode for input
+    # Enter alternate screen mode, hide cursor
     print("\033[?1049h\033[?25l", end="", flush=True)
 
-    # Save terminal settings
-    old_settings = termios.tcgetattr(sys.stdin)
+    # Save terminal settings (Unix only)
+    old_settings = None
+    if sys.platform != "win32":
+        old_settings = termios.tcgetattr(sys.stdin)
 
     try:
-        # Set terminal to raw mode for non-blocking input
-        tty.setraw(sys.stdin.fileno())
+        # Set terminal to raw mode for non-blocking input (Unix only)
+        if sys.platform != "win32":
+            tty.setraw(sys.stdin.fileno())
 
         start_time = time.time()
         last_frame_time = start_time
@@ -784,8 +804,9 @@ def fireworks():
     except KeyboardInterrupt:
         pass
     finally:
-        # Restore terminal settings
-        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+        # Restore terminal settings (Unix only)
+        if old_settings is not None:
+            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
         # Exit alternate screen mode, show cursor
         print("\033[?1049l\033[?25h", flush=True)
 
