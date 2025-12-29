@@ -1,6 +1,6 @@
 [project]
 name = "ny2026"
-version = "1.0.3"
+version = "1.0.4"
 description = "A countdown to 2026 in your terminal"
 readme = "README.md"
 requires-python = ">=3.13"
