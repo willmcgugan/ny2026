@@ -495,7 +495,7 @@ class Firework:
         self.x = random.uniform(canvas_width * 0.2, canvas_width * 0.8)
         self.y = canvas_height - 1
         # Spawn at camera position plus some forward distance
-        self.z = camera_z + random.uniform(50.0, 150.0)
+        self.z = camera_z + random.uniform(50.0, 300.0)
 
         # Calculate target explosion height (top quarter to top half of screen)
         self.target_y = random.uniform(canvas_height * 0.15, canvas_height * 0.4)
@@ -725,7 +725,7 @@ def fireworks():
     midnight_reached = False
 
     # Enter alternate screen mode, hide cursor
-    print("\033[?1049h\033[?25l", end="", flush=True)
+    print("\033[?1049h\033[?25l\033[2J", end="", flush=True)
 
     # Save terminal settings (Unix only)
     old_settings = None
@@ -790,10 +790,11 @@ def fireworks():
                 firework.render(canvas, camera_z)
 
             # Render countdown on canvas
+            # Use bright green when countdown has finished, default color otherwise
             if midnight_reached:
-                countdown_color = BrailleCanvas.rgb_color(20, 255, 20)  # White
+                countdown_color = BrailleCanvas.rgb_color(0, 255, 0)  # Bright green
             else:
-                countdown_color = BrailleCanvas.rgb_color(255, 255, 255)  # White
+                countdown_color = "\033[39m"  # Default foreground color
             render_countdown_on_canvas(canvas, countdown, countdown_color)
 
             # Render to screen (single write operation is faster)
