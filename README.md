@@ -4,6 +4,12 @@ At your desk for New Years? Crack open a beer and a terminal. Run this app, and 
 
 You can also press SPACE if you are impatient for the fireworks to start...
 
+
+
+
+
+
+
 <img alt="Screenshot 2025-12-28 at 21 42 21" src="https://github.com/user-attachments/assets/f9872cec-27a6-4154-b481-ee9383c8e46e" />
 
 Install with:
@@ -13,3 +19,9 @@ uvx ny2026@latest
 ```
 
 Requires [UV](https://docs.astral.sh/uv/getting-started/installation/)
+
+
+
+https://github.com/user-attachments/assets/8cc2718b-2875-435c-9431-cc991887c5be
+
+
