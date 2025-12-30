@@ -8,9 +8,21 @@ import random
 import time
 import os
 import sys
+import threading
+import queue
+import numpy as np
 from datetime import datetime, timezone
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 from braille_canvas import BrailleCanvas
+import traceback
+
+# Sound support - will be enabled if sounddevice is available
+try:
+    import sounddevice as sd
+
+    SOUND_AVAILABLE = True
+except ImportError:
+    SOUND_AVAILABLE = False
 
 # Cross-platform keyboard input handling
 if sys.platform == "win32":
@@ -292,6 +304,229 @@ DIGIT_PATTERNS = {
 }
 
 
+class SoundManager:
+    """Manages sound generation and playback for fireworks."""
+
+    def __init__(self):
+        """Initialize sound system and generate sound effects."""
+        self.enabled = SOUND_AVAILABLE
+        self.explosion_sound_data = None
+        self.sample_rate = 22050
+        self.duration = 1.5  # Sound duration in seconds
+        self.max_concurrent_sounds = 8  # Limit concurrent sounds to prevent overload
+
+        # List of currently playing sounds (each is [data, position])
+        self.active_sounds = []
+        self.sound_lock = threading.Lock()
+
+        # Cache of pre-generated stereo sounds at different pan positions
+        self.stereo_cache = {}  # Maps pan_position -> stereo_audio_data
+
+        # Thread control
+        self.running = False
+        self.sound_thread = None
+
+        if self.enabled:
+            try:
+                self.explosion_sound_data = self._generate_explosion_sound()
+                # Pre-generate stereo variations at different pan positions
+                # This avoids runtime computation and thread creation
+                self._generate_stereo_cache()
+                # Start the sound playback thread
+                self._start_sound_thread()
+            except Exception as e:
+                # If sound generation fails, disable sound and log error
+                self.enabled = False
+                self.explosion_sound_data = None
+                self.stereo_cache = {}
+
+    def _generate_explosion_sound(self) -> Optional[np.ndarray]:
+        """Generate a muffled, distant explosion sound with low-pass filtering.
+
+        Returns:
+            Mono audio data as numpy array (float32), or None if disabled
+        """
+        if not self.enabled:
+            return None
+
+        duration = self.duration
+
+        # Create time array
+        t = np.linspace(0, duration, int(self.sample_rate * duration))
+
+        # Explosion is mostly noise with low frequency emphasis
+        # Generate white noise
+        noise = np.random.normal(0, 1, len(t))
+
+        # Apply low-pass filter effect by adding low-frequency rumble
+        rumble_freq = 60
+        rumble = np.sin(2 * np.pi * rumble_freq * t)
+        rumble += 0.5 * np.sin(2 * np.pi * rumble_freq * 2 * t)
+
+        # Combine noise and rumble
+        wave = 0.7 * noise + 0.3 * rumble
+
+        # Apply sharp attack and exponential decay envelope
+        envelope = np.exp(-3 * t / duration)
+        wave *= envelope
+
+        # Add a bit of crackle (short bursts)
+        crackle = np.random.choice([0, 1], size=len(t), p=[0.95, 0.05])
+        crackle = crackle * np.random.normal(0, 0.5, len(t))
+        wave += crackle * envelope
+
+        # Apply simple low-pass filter using moving average
+        # This muffles high frequencies while keeping low frequencies
+        window_size = 15  # Larger window = more muffling
+        kernel = np.ones(window_size) / window_size
+        wave_filtered = np.convolve(wave, kernel, mode="same")
+
+        # Normalize and keep as float32 for sounddevice
+        wave_filtered = np.clip(wave_filtered, -1, 1) * 0.5  # Reduce volume to 50%
+
+        return wave_filtered.astype(np.float32)
+
+    def _generate_stereo_cache(self):
+        """Pre-generate stereo variations at different pan positions.
+
+        This caches stereo audio for 17 pan positions from -1.0 to 1.0,
+        avoiding expensive runtime computation during playback.
+        """
+        if not self.enabled or self.explosion_sound_data is None:
+            return
+
+        # Generate 17 positions: -1.0, -0.875, -0.75, ..., 0, ..., 0.75, 0.875, 1.0
+        # This gives us 8 left positions, center, and 8 right positions
+        for i in range(17):
+            pan = -1.0 + (i * 0.125)  # Map index to -1.0 to 1.0
+
+            # Calculate left and right channel gains using constant power panning
+            pan_angle = (pan + 1) * (np.pi / 4)  # Map -1..1 to 0..pi/2
+            left_gain = np.cos(pan_angle)
+            right_gain = np.sin(pan_angle)
+
+            # Create stereo audio by applying gains to mono source
+            mono_data = self.explosion_sound_data
+            stereo_data = np.column_stack(
+                (mono_data * left_gain, mono_data * right_gain)
+            ).astype(np.float32)  # Ensure float32 dtype for sounddevice
+
+            # Store in cache with quantized pan value as key
+            self.stereo_cache[round(pan, 3)] = stereo_data
+
+    def _start_sound_thread(self):
+        """Start the dedicated sound playback thread."""
+        self.running = True
+        self.sound_thread = threading.Thread(
+            target=self._sound_playback_loop, daemon=True
+        )
+        self.sound_thread.start()
+
+    def _audio_callback(self, outdata, frames, time_info, status):
+        """Callback to fill audio buffer with mixed sounds."""
+        # Zero out the buffer
+        outdata.fill(0)
+
+        with self.sound_lock:
+            # Mix all active sounds
+            sounds_to_remove = []
+
+            for i, (sound_data, position) in enumerate(self.active_sounds):
+                # Calculate how much of this sound we can output
+                remaining = len(sound_data) - position
+                to_output = min(remaining, frames)
+
+                # Add this sound to the output buffer (mix)
+                outdata[:to_output] += sound_data[position : position + to_output]
+
+                # Update position
+                self.active_sounds[i][1] += to_output
+
+                # Mark for removal if finished
+                if position + to_output >= len(sound_data):
+                    sounds_to_remove.append(i)
+
+            # Remove finished sounds (in reverse order to maintain indices)
+            for i in reversed(sounds_to_remove):
+                self.active_sounds.pop(i)
+
+    def _sound_playback_loop(self):
+        """Main loop for sound playback thread. Manages audio stream."""
+        if not self.enabled:
+            return
+
+        try:
+            # Create a single output stream with callback for mixing
+            stream = sd.OutputStream(
+                samplerate=self.sample_rate,
+                channels=2,
+                dtype="float32",
+                blocksize=1024,
+                callback=self._audio_callback,
+            )
+            stream.start()
+
+            # Just keep the stream alive while running
+            while self.running:
+                time.sleep(0.1)
+
+            # Clean up stream when shutting down
+            stream.stop()
+            stream.close()
+
+        except Exception:
+            # If stream creation fails, disable sound
+            self.enabled = False
+
+    def stop(self):
+        """Stop the sound playback thread."""
+        self.running = False
+        if self.sound_thread:
+            self.sound_thread.join(timeout=1.0)
+
+    def play_explosion(self, x: float, screen_width: float):
+        """Play the explosion sound with stereo panning based on position.
+
+        Args:
+            x: Horizontal position of the explosion (in screen coordinates)
+            screen_width: Width of the screen (to normalize position)
+        """
+        if not self.enabled or not self.stereo_cache:
+            return
+
+        try:
+            with self.sound_lock:
+                # Check if too many sounds are already playing
+                if len(self.active_sounds) >= self.max_concurrent_sounds:
+                    return  # Skip this sound if too many are already playing
+
+            # Calculate pan position: -1 (left) to 1 (right)
+            # x=0 -> left, x=screen_width -> right
+            pan = (x / screen_width) * 2 - 1
+            pan = np.clip(pan, -1, 1)
+
+            # Quantize pan to nearest cached position (every 0.125)
+            # This allows us to use pre-generated stereo audio
+            quantized_pan = round(pan / 0.125) * 0.125
+            quantized_pan = round(np.clip(quantized_pan, -1.0, 1.0), 3)
+
+            # Retrieve pre-generated stereo audio from cache
+            stereo_data = self.stereo_cache.get(quantized_pan)
+            if stereo_data is None:
+                # Fallback to center if cache lookup fails
+                stereo_data = self.stereo_cache.get(0.0)
+                if stereo_data is None:
+                    return
+
+            # Add sound to active sounds list with position 0
+            with self.sound_lock:
+                self.active_sounds.append([stereo_data, 0])
+
+        except Exception:
+            # Don't crash on audio errors, just skip playback
+            pass
+
+
 def get_countdown_to_newyear_2026() -> Tuple[str, bool]:
     """
     Calculate time remaining until New Year's Day 2026 (2026-01-01 00:00:00 UTC).
@@ -476,7 +711,13 @@ class Particle:
 class Firework:
     """A firework that launches, arcs, and explodes."""
 
-    def __init__(self, canvas_width: int, canvas_height: int, camera_z: float = 0.0):
+    def __init__(
+        self,
+        canvas_width: int,
+        canvas_height: int,
+        camera_z: float = 0.0,
+        sound_manager: Optional[SoundManager] = None,
+    ):
         """
         Initialize a firework.
 
@@ -484,9 +725,11 @@ class Firework:
             canvas_width: Width of the canvas in pixels
             canvas_height: Height of the canvas in pixels
             camera_z: Current Z position of the camera
+            sound_manager: Optional sound manager for playing sound effects
         """
         self.canvas_width = canvas_width
         self.canvas_height = canvas_height
+        self.sound_manager = sound_manager
 
         # Random neon color
         self.color = self._random_neon_color()
@@ -515,20 +758,19 @@ class Firework:
         self.launch_trail: List[Tuple[float, float]] = []
 
     def _random_neon_color(self) -> str:
-        """Generate a random neon color."""
-        neon_colors = [
-            (255, 0, 255),  # Magenta
-            (0, 255, 255),  # Cyan
-            (255, 255, 0),  # Yellow
-            (255, 0, 128),  # Hot pink
-            (0, 255, 128),  # Spring green
-            (255, 128, 0),  # Orange
-            (128, 0, 255),  # Purple
-            (255, 0, 0),  # Red
-            (0, 255, 0),  # Green
-            (0, 128, 255),  # Light blue
+        """Generate a realistic firework color."""
+        # Common real firework colors based on metal compounds used in pyrotechnics
+        firework_colors = [
+            (255, 50, 50),    # Red (Strontium)
+            (255, 140, 0),    # Orange (Calcium)
+            (255, 215, 0),    # Gold/Yellow (Sodium, Iron)
+            (240, 240, 240),  # White/Silver (Aluminum, Magnesium)
+            (50, 255, 50),    # Green (Barium)
+            (100, 150, 255),  # Blue (Copper)
+            (200, 100, 255),  # Purple (Strontium + Copper)
+            (255, 192, 203),  # Pink (Strontium + Titanium)
         ]
-        r, g, b = random.choice(neon_colors)
+        r, g, b = random.choice(firework_colors)
         return BrailleCanvas.rgb_color(r, g, b)
 
     def update(self, dt: float):
@@ -560,9 +802,9 @@ class Firework:
                 if self.time_since_apex >= 1.0:
                     self.explode()
         else:
-            # Update explosion particles with reduced gravity for better spread
+            # Update explosion particles with gravity for realistic falling motion
             for particle in self.particles:
-                particle.update(dt, gravity=10.0, air_resistance=0.97)
+                particle.update(dt, gravity=50.0, air_resistance=0.97)
 
             # Remove dead particles
             self.particles = [p for p in self.particles if p.is_alive()]
@@ -570,6 +812,10 @@ class Firework:
     def explode(self):
         """Create explosion particles."""
         self.exploded = True
+
+        # Play explosion sound with stereo positioning
+        if self.sound_manager:
+            self.sound_manager.play_explosion(self.x, self.canvas_width)
 
         # Generate particles in all directions with higher speed for more dramatic effect
         num_particles = random.randint(450, 750)
@@ -706,6 +952,9 @@ def fireworks():
     # Create canvas
     canvas = BrailleCanvas(canvas_width, canvas_height, default_color=0)
 
+    # Initialize sound manager
+    sound_manager = SoundManager()
+
     # Fireworks list
     fireworks: List[Firework] = []
 
@@ -757,7 +1006,9 @@ def fireworks():
             key = is_key_pressed()
             if key == " ":
                 # Launch a single firework on space press
-                fireworks.append(Firework(canvas_width, canvas_height, camera_z))
+                fireworks.append(
+                    Firework(canvas_width, canvas_height, camera_z, sound_manager)
+                )
             elif key == "q" or key == "\x03":  # 'q' or Ctrl+C
                 break
 
@@ -769,7 +1020,9 @@ def fireworks():
 
             # Spawn new fireworks automatically only after midnight
             if midnight_reached and elapsed - last_spawn_time > spawn_interval:
-                fireworks.append(Firework(canvas_width, canvas_height, camera_z))
+                fireworks.append(
+                    Firework(canvas_width, canvas_height, camera_z, sound_manager)
+                )
                 last_spawn_time = elapsed
                 spawn_interval = random.uniform(0.2, 0.8)
 
@@ -805,6 +1058,8 @@ def fireworks():
     except KeyboardInterrupt:
         pass
     finally:
+        # Stop sound manager
+        sound_manager.stop()
         # Restore terminal settings (Unix only)
         if old_settings is not None:
             termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
