@@ -744,12 +744,22 @@ class Firework:
         # Spawn at camera position plus some forward distance
         self.z = camera_z + random.uniform(50.0, 300.0)
 
-        # Calculate target explosion height (top quarter to top half of screen)
-        self.target_y = random.uniform(canvas_height * 0.15, canvas_height * 0.4)
+        # Calculate target explosion height (top 10% to top third of screen)
+        self.target_y = random.uniform(canvas_height * 0.1, canvas_height * 0.33)
 
+        # Calculate required launch velocity to reach target height
+        # Using kinematic equation: v² = u² + 2as
+        # At apex: v = 0, so u² = -2as, where a = gravity and s = distance to travel
+        # We're launching from bottom (y = canvas_height - 1) to target_y
+        # Since y increases downward, distance = target_y - start_y (negative)
+        gravity = 100.0
+        distance_to_target = self.target_y - self.y  # Negative value (going up)
+        # u = sqrt(-2 * gravity * distance_to_target)
+        required_velocity = math.sqrt(-2 * gravity * distance_to_target)
+        
         # Launch velocity (upward with slight horizontal drift)
         self.vx = random.uniform(-20, 20)
-        self.vy = random.uniform(-150, -120) * 1.3  # Strong upward velocity
+        self.vy = -required_velocity  # Negative because upward
         self.vz = 0.0
 
         # Explosion parameters
