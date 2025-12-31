@@ -40,6 +40,11 @@ There was also a last minute bug reported by another mamallian brain. It was usi
 
 Of course I should have checked, but I kind of feel that a human would be less likely to make that mistake. If you actually had to type UTC in the code, that should have triggered the realization that it would break for other timezones.
 
+There was another implementation issue that I noticed, as a mammal familiar with these things.
+The timer was rounding *down*.
+This meant that the count-down would go from "00:00:01" to "00:00:00" and stay there for a second before displaying "2026", rather than straight from "00:00:01" to "2026".
+The fix was to round *up*. So that for the last second before 2026 it displays "00:00:01".
+
 Overall, the code is not bad. Not good, but not terrible. There are some lines which I don't think are even neccesary. Reminants of failed experiments perhaps. I suspect Claude could easily tidy those up, but you do need to know to ask.
 
 Considering there isn't a large corpus of firework simulations with braille characters in the terminal (I assume), I think Claude did OK here.
