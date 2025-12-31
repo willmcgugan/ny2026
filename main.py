@@ -574,7 +574,7 @@ def get_countdown_to_newyear_2026() -> Tuple[str, bool]:
         return "2026", True
 
     # Calculate hours, minutes, seconds
-    total_seconds = int(diff.total_seconds())
+    total_seconds = math.ceil(diff.total_seconds())
     hours = total_seconds // 3600
     minutes = (total_seconds % 3600) // 60
     seconds = total_seconds % 60
